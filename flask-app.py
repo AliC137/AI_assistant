@@ -1,5 +1,5 @@
 from flask import Flask, request, render_template_string, jsonify
-from langchain_community.document_loaders import PyPDFLoader
+from langchain_community.document_loaders import PyPDFLoader, UnstructuredWordDocumentLoader
 from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_ollama import OllamaLLM
@@ -24,60 +24,113 @@ qa_chain = None
 # HTML with chat and AJAX file upload
 HTML_TEMPLATE = """
 <!doctype html>
-<title>Upload PDF and Chat</title>
-<h1>Upload PDF</h1>
-<form id="uploadForm" enctype="multipart/form-data">
-  <input type="file" name="file" required>
-  <input type="submit" value="Upload">
-</form>
-<p id="upload-status"></p>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>AI Assistant Avicenna Chat</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { background-color: #f8f9fa; }
+    #chat-box {
+      background-color: white;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 15px;
+      height: 400px;
+      overflow-y: auto;
+      margin-bottom: 15px;
+    }
+    .message { margin-bottom: 10px; }
+    .user { text-align: right; }
+    .user .bubble {
+      display: inline-block;
+      background: #d1e7dd;
+      color: #0f5132;
+      padding: 10px 15px;
+      border-radius: 15px 15px 0 15px;
+    }
+    .bot .bubble {
+      display: inline-block;
+      background: #e2e3e5;
+      color: #41464b;
+      padding: 10px 15px;
+      border-radius: 15px 15px 15px 0;
+    }
+  </style>
+</head>
+<body class="container py-4">
 
-<hr>
-<h2>Chat</h2>
-<div id="chat-box" style="border:1px solid #ccc; padding:10px; height:300px; overflow-y:scroll;"></div>
-<input id="user-input" placeholder="Ask a question..." style="width:80%;">
-<button onclick="sendMessage()">Send</button>
-<p id="loading" style="display:none;">Thinking...</p>
+  <h2 class="mb-4">AIAvicenna: Chat Assistant</h2>
 
-<script>
-document.getElementById("uploadForm").addEventListener("submit", async function(e) {
-    e.preventDefault();
-    const formData = new FormData(this);
-    const status = document.getElementById("upload-status");
-    status.innerText = "Uploading...";
-    
+  <div class="mb-3">
+    <label for="file" class="form-label">Upload a PDF</label>
+    <form id="uploadForm" enctype="multipart/form-data" class="input-group">
+      <input class="form-control" type="file" name="file" id="file" accept=".pdf,.docx" required>
+      <button class="btn btn-primary" type="submit">Upload</button>
+    </form>
+    <div id="upload-status" class="form-text mt-1 text-success"></div>
+  </div>
+
+  <div id="chat-box"></div>
+
+  <div class="input-group">
+    <input id="user-input" class="form-control" placeholder="Ask a question..." />
+    <button class="btn btn-success" onclick="sendMessage()" id="send-btn">Send</button>
+  </div>
+  <div id="loading" class="form-text mt-2 text-muted" style="display:none;">Thinking...</div>
+
+  <script>
+    document.getElementById("uploadForm").addEventListener("submit", async function(e) {
+  e.preventDefault();
+
+  const fileInput = document.getElementById("file");
+  const status = document.getElementById("upload-status");
+  const file = fileInput.files[0];
+
+  if (!file) {
+    status.innerText = "Please select a file.";
+    status.className = "form-text text-danger";
+    return;
+  }
+
+  const allowedTypes = [".pdf", ".docx"];
+  const ext = file.name.split('.').pop().toLowerCase();
+  if (!allowedTypes.includes("." + ext)) {
+    status.innerText = "Unsupported file type. Please upload a .pdf or .docx file.";
+    status.className = "form-text text-danger";
+    return;
+  }
+
+  status.innerText = "Uploading...";
+  status.className = "form-text text-muted";
+
+  const formData = new FormData();
+  formData.append("file", file);
+
+  try {
     const response = await fetch("/upload", {
-        method: "POST",
-        body: formData
+      method: "POST",
+      body: formData
     });
-
     const result = await response.json();
-    status.innerText = result.message;
+
+    if (response.ok) {
+      status.innerText = result.message;
+      status.className = "form-text text-success";
+    } else {
+      status.innerText = result.message || "Upload failed.";
+      status.className = "form-text text-danger";
+    }
+  } catch (err) {
+    status.innerText = "An unexpected error occurred.";
+    status.className = "form-text text-danger";
+  }
 });
-
-async function sendMessage() {
-    const input = document.getElementById("user-input");
-    const chatBox = document.getElementById("chat-box");
-    const loading = document.getElementById("loading");
-
-    if (!input.value) return;
-
-    chatBox.innerHTML += "<p><b>You:</b> " + input.value + "</p>";
-    loading.style.display = "block";
-
-    const res = await fetch("/chat", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({question: input.value})
-    });
-    const data = await res.json();
-    chatBox.innerHTML += "<p><b>Bot:</b> " + data.answer + "</p>";
-    loading.style.display = "none";
-    input.value = "";
-    chatBox.scrollTop = chatBox.scrollHeight;
-}
-</script>
+  </script>
+</body>
+</html>
 """
+
 
 def file_hash(filepath):
     hasher = hashlib.sha256()
@@ -98,6 +151,12 @@ def upload():
         return jsonify({"message": "No file uploaded"}), 400
 
     filename = secure_filename(file.filename)
+    ext = os.path.splitext(filename)[1].lower()
+
+    # Only accept PDF and DOCX
+    if ext not in [".pdf", ".docx"]:
+        return jsonify({"message": "Unsupported file type. Please upload a .pdf or .docx file."}), 400
+
     file_path = os.path.join(UPLOAD_FOLDER, filename)
     file.save(file_path)
 
@@ -109,7 +168,12 @@ def upload():
         if os.path.exists(os.path.join(index_dir, "index.faiss")):
             db = FAISS.load_local(index_dir, embeddings, allow_dangerous_deserialization=True)
         else:
-            loader = PyPDFLoader(file_path)
+            # Load based on file type
+            if ext == ".pdf":
+                loader = PyPDFLoader(file_path)
+            elif ext == ".docx":
+                loader = UnstructuredWordDocumentLoader(file_path)
+
             documents = loader.load()
             chunks = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50).split_documents(documents)
             db = FAISS.from_documents(chunks, embeddings)
@@ -118,7 +182,7 @@ def upload():
         retriever = db.as_retriever()
         qa_chain = RetrievalQA.from_chain_type(llm=llm, retriever=retriever)
 
-        return jsonify({"message": "PDF uploaded and processed successfully."})
+        return jsonify({"message": f"{ext.upper()} file uploaded and processed successfully."})
     except Exception as e:
         return jsonify({"message": f"Error: {str(e)}"}), 500
 
