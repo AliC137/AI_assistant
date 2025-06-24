@@ -24,46 +24,119 @@ qa_chain = None
 # HTML with chat and AJAX file upload
 HTML_TEMPLATE = """
 <!doctype html>
-<html lang="en">
+<html lang="en" data-bs-theme="light">
 <head>
   <meta charset="utf-8">
   <title>AI Assistant Avicenna Chat</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-  <style>
-    body { background-color: #f8f9fa; }
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+  body {
+    background-color: var(--bs-body-bg);
+    color: var(--bs-body-color);
+  }
+
+  #chat-box {
+    background-color: var(--bs-body-bg);
+    border: 1px solid var(--bs-border-color);
+    border-radius: 12px;
+    padding: 15px;
+    height: 400px;
+    overflow-y: auto;
+    margin-bottom: 15px;
+  }
+
+  .message {
+    margin-bottom: 15px;
+  }
+
+  .bubble {
+    padding: 10px 15px;
+    border-radius: 15px;
+    max-width: 80%;
+  }
+
+  .user.bubble {
+    background: #d1e7dd;
+    color: #0f5132;
+  }
+
+  .bot.bubble {
+    background: #e2e3e5;
+    color: #41464b;
+  }
+
+  .avatar {
+    width: 36px;
+    height: 36px;
+    font-size: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background-color: #dee2e6;
+  }
+
+  /* New styling for file input, buttons and user input */
+  #uploadForm input[type="file"],
+  #uploadForm button,
+  #user-input,
+  #send-btn {
+    background-color: #000000 !important;
+    color: #ffffff !important;
+    border-color: #444444 !important;
+  }
+
+  /* Placeholder color for user input */
+  #user-input::placeholder {
+    color: #bbbbbb !important;
+  }
+
+  /* Focus outlines */
+  #uploadForm input[type="file"]:focus,
+  #user-input:focus {
+    outline: 2px solid #0d6efd;
+    background-color: #121212 !important;
+    color: #fff !important;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    html {
+      color-scheme: dark;
+    }
+
+    body {
+      background-color: #121212;
+      color: #f1f1f1;
+    }
+
     #chat-box {
-      background-color: white;
-      border: 1px solid #ddd;
-      border-radius: 8px;
-      padding: 15px;
-      height: 400px;
-      overflow-y: auto;
-      margin-bottom: 15px;
+      background-color: #1e1e1e;
+      border-color: #333;
     }
-    .message { margin-bottom: 10px; }
-    .user { text-align: right; }
-    .user .bubble {
-      display: inline-block;
-      background: #d1e7dd;
-      color: #0f5132;
-      padding: 10px 15px;
-      border-radius: 15px 15px 0 15px;
+
+    .user.bubble {
+      background-color: #265d4a;
+      color: #d1ffd5;
     }
-    .bot .bubble {
-      display: inline-block;
-      background: #e2e3e5;
-      color: #41464b;
-      padding: 10px 15px;
-      border-radius: 15px 15px 15px 0;
+
+    .bot.bubble {
+      background-color: #3a3a3a;
+      color: #e0e0e0;
     }
-  </style>
+
+    .avatar {
+      background-color: #3a3a3a;
+    }
+  }
+</style>
 </head>
 <body class="container py-4">
 
   <h2 class="mb-4">AIAvicenna: Chat Assistant</h2>
 
   <div class="mb-3">
-    <label for="file" class="form-label">Upload a PDF</label>
+    <label for="file" class="form-label">Upload a PDF or DOCX</label>
     <form id="uploadForm" enctype="multipart/form-data" class="input-group">
       <input class="form-control" type="file" name="file" id="file" accept=".pdf,.docx" required>
       <button class="btn btn-primary" type="submit">Upload</button>
@@ -81,52 +154,104 @@ HTML_TEMPLATE = """
 
   <script>
     document.getElementById("uploadForm").addEventListener("submit", async function(e) {
-  e.preventDefault();
+      e.preventDefault();
 
-  const fileInput = document.getElementById("file");
-  const status = document.getElementById("upload-status");
-  const file = fileInput.files[0];
+      const fileInput = document.getElementById("file");
+      const status = document.getElementById("upload-status");
+      const file = fileInput.files[0];
 
-  if (!file) {
-    status.innerText = "Please select a file.";
-    status.className = "form-text text-danger";
-    return;
-  }
+      if (!file) {
+        status.innerText = "Please select a file.";
+        status.className = "form-text text-danger";
+        return;
+      }
 
-  const allowedTypes = [".pdf", ".docx"];
-  const ext = file.name.split('.').pop().toLowerCase();
-  if (!allowedTypes.includes("." + ext)) {
-    status.innerText = "Unsupported file type. Please upload a .pdf or .docx file.";
-    status.className = "form-text text-danger";
-    return;
-  }
+      const allowedTypes = [".pdf", ".docx"];
+      const ext = file.name.split('.').pop().toLowerCase();
+      if (!allowedTypes.includes("." + ext)) {
+        status.innerText = "Unsupported file type. Please upload a .pdf or .docx file.";
+        status.className = "form-text text-danger";
+        return;
+      }
 
-  status.innerText = "Uploading...";
-  status.className = "form-text text-muted";
+      status.innerText = "Uploading...";
+      status.className = "form-text text-muted";
 
-  const formData = new FormData();
-  formData.append("file", file);
+      const formData = new FormData();
+      formData.append("file", file);
 
-  try {
-    const response = await fetch("/upload", {
-      method: "POST",
-      body: formData
+      try {
+        const response = await fetch("/upload", {
+          method: "POST",
+          body: formData
+        });
+        const result = await response.json();
+
+        if (response.ok) {
+          status.innerText = result.message;
+          status.className = "form-text text-success";
+        } else {
+          status.innerText = result.message || "Upload failed.";
+          status.className = "form-text text-danger";
+        }
+      } catch (err) {
+        status.innerText = "An unexpected error occurred.";
+        status.className = "form-text text-danger";
+      }
     });
-    const result = await response.json();
 
-    if (response.ok) {
-      status.innerText = result.message;
-      status.className = "form-text text-success";
-    } else {
-      status.innerText = result.message || "Upload failed.";
-      status.className = "form-text text-danger";
+    document.getElementById("user-input").addEventListener("keydown", function(event) {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        sendMessage();
+      }
+    });
+
+    async function sendMessage() {
+      const input = document.getElementById("user-input");
+      const chatBox = document.getElementById("chat-box");
+      const loading = document.getElementById("loading");
+      const question = input.value.trim();
+      if (!question) return;
+
+      chatBox.innerHTML += `
+        <div class="message d-flex justify-content-end align-items-start">
+          <div class="user bubble me-2">${question}</div>
+          <div class="avatar">🧑</div>
+        </div>
+      `;
+      input.value = "";
+      loading.style.display = "block";
+
+      try {
+        const response = await fetch("/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ question: question })
+        });
+        const data = await response.json();
+        if (data.answer) {
+          chatBox.innerHTML += `
+            <div class="message d-flex align-items-start">
+              <div class="avatar me-2">🤖</div>
+              <div class="bot bubble">${marked.parse(data.answer)}</div>
+            </div>
+          `;
+        }
+      } catch (error) {
+        chatBox.innerHTML += `
+          <div class="message d-flex align-items-start">
+            <div class="avatar me-2">🤖</div>
+            <div class="bot bubble">An error occurred while processing your request.</div>
+          </div>
+        `;
+      }
+
+      loading.style.display = "none";
+      chatBox.scrollTop = chatBox.scrollHeight;
     }
-  } catch (err) {
-    status.innerText = "An unexpected error occurred.";
-    status.className = "form-text text-danger";
-  }
-});
   </script>
+
 </body>
 </html>
 """

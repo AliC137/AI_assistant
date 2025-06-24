@@ -12,7 +12,7 @@ A simple web app to chat with the contents of any PDF file using an LLM. Built u
 
 # Features
 
-- ✅ Upload a PDF file
+- ✅ Upload a PDF or WORD file
 - ✅ Ask questions about its content
 - ✅ Ask general knowledge questions (not limited to the PDF)
 - ✅ Local and private (runs entirely on your machine)
@@ -37,7 +37,7 @@ cd flask-app.py
 AIAvicenna/
 │
 ├── flask-app.py                  # Main Flask app
-├── uploads/                # Uploaded PDFs (not tracked by Git)
+├── uploads/                # Uploaded files (not tracked by Git)
 ├── faiss_indexes/
 
 # Make sure Ollama is installed
